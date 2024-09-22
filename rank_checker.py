@@ -73,13 +73,22 @@ def update_rankings():
         google_api_key = os.getenv('AIzaSyDXQX02NXtVcO32hoK4gwrlL0IewT6sdfA')
         google_cse_id = os.getenv('e09780ac268824024')
         credentials_json = os.getenv('/home/ec2-user/seo-rank-checker/service_account.json')  # '/home/ec2-user/seo-rank-checker/service_account.json'
+        
+        # デバッグ用ログ
+        logging.info(f"GOOGLE_API_KEY: {google_api_key}")
+        logging.info(f"GOOGLE_CSE_ID: {google_cse_id}")
+        logging.info(f"GOOGLE_CREDENTIALS_JSON: {credentials_json}")
+
+        if not google_api_key or not google_cse_id or not credentials_json:
+            raise ValueError("One or more environment variables are not set.")
+        
         spreadsheet_name = 'SEO Rankings'  # スプレッドシートの名前
         sheet_name = 'Rankings'             # 使用するシート名（例: 'Rankings'）
 
         # キーワードとターゲットURLのリスト
         targets = [
             {
-                'keyword': 'どら焼き 有名',
+                'keyword': 'どら焼き　有名',
                 'url': 'https://tsuboya.net/blogs/blog/dorayaki_famous'
             },
             # 他のキーワードとURLを追加する場合は、ここに追加
@@ -119,6 +128,7 @@ def update_rankings():
     except Exception as e:
         logging.error(f"Error updating rankings: {e}")
         print(f"Error updating rankings: {e}")
+
 
 # スケジューリング設定
 schedule.every().day.at("00:00").do(update_rankings)
