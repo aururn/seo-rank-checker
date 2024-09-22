@@ -75,21 +75,20 @@ def update_rankings():
         google_api_key = os.getenv('GOOGLE_API_KEY')
         google_cse_id = os.getenv('GOOGLE_CSE_ID')
         credentials_json = os.getenv('GOOGLE_CREDENTIALS_JSON')  # '/home/ec2-user/seo-rank-checker/service_account.json'
+        spreadsheet_id = os.getenv('SPREADSHEET_ID')  # スプレッドシートのキー
 
         # デバッグ用ログ（環境変数が設定されているか確認）
         logging.info(f"GOOGLE_API_KEY is set: {bool(google_api_key)}")
         logging.info(f"GOOGLE_CSE_ID is set: {bool(google_cse_id)}")
         logging.info(f"GOOGLE_CREDENTIALS_JSON is set: {bool(credentials_json)}")
+        logging.info(f"SPREADSHEET_ID is set: {bool(spreadsheet_id)}")
 
-        if not google_api_key or not google_cse_id or not credentials_json:
+        if not google_api_key or not google_cse_id or not credentials_json or not spreadsheet_id:
             raise ValueError("One or more environment variables are not set.")
 
         # ファイルの存在確認
         if not os.path.isfile(credentials_json):
             raise FileNotFoundError(f"Service account JSON file not found at: {credentials_json}")
-
-        spreadsheet_name = 'SEO Rankings'  # スプレッドシートの名前
-        sheet_name = 'Rankings'             # 使用するシート名（例: 'Rankings'）
 
         # キーワードとターゲットURLのリスト
         targets = [
@@ -103,11 +102,12 @@ def update_rankings():
         # 認証
         client = authenticate_google_sheets(credentials_json)
 
-        # シート取得
-        sheet = client.open(spreadsheet_name).worksheet(sheet_name)
+        # スプレッドシートをキーで開く
+        spreadsheet = client.open_by_key(spreadsheet_id)
+        sheet = spreadsheet.sheet1  # 1つ目のシートを使用する場合
 
         # 日付取得
-        date_str = datetime.now().strftime("%Y-%m-%d")
+        date_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
         # 各ターゲットの順位を取得し、シートに書き込み
         for target in targets:
@@ -116,11 +116,11 @@ def update_rankings():
 
             # Google順位取得
             google_rank = get_google_rank(google_api_key, google_cse_id, keyword, url)
-            google_rank_str = google_rank if google_rank else '未表示'
+            google_rank_str = str(google_rank) if google_rank else '未表示'
 
             # Yahoo順位取得
             yahoo_rank = get_yahoo_rank(keyword, url)
-            yahoo_rank_str = yahoo_rank if yahoo_rank else '未表示'
+            yahoo_rank_str = str(yahoo_rank) if yahoo_rank else '未表示'
 
             # シートに追加するデータ
             row = [date_str, keyword, url, google_rank_str, yahoo_rank_str]
@@ -153,6 +153,9 @@ def main():
     if args.run_once:
         update_rankings()
     else:
+        # 再起動時に一度だけ順位を取得
+        update_rankings()
+        # 定期的な順位チェックを開始
         schedule_tasks()
 
 if __name__ == "__main__":

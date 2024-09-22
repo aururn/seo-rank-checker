@@ -1,0 +1,11 @@
+# Secrets
+service_account.json
+
+# Logs
+rank_checker.log
+
+# Environment variables
+seo_env/
+
+# 大きなファイルやその他無視したいファイル
+*.exe
