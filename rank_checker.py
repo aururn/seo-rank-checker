@@ -7,6 +7,8 @@ import schedule
 import time
 import os
 import logging
+import argparse
+import sys
 
 # ログ設定
 logging.basicConfig(
@@ -70,18 +72,22 @@ def authenticate_google_sheets(creds_json):
 def update_rankings():
     try:
         # 設定
-        google_api_key = os.getenv('AIzaSyDXQX02NXtVcO32hoK4gwrlL0IewT6sdfA')
-        google_cse_id = os.getenv('e09780ac268824024')
-        credentials_json = os.getenv('/home/ec2-user/seo-rank-checker/service_account.json')  # '/home/ec2-user/seo-rank-checker/service_account.json'
-        
-        # デバッグ用ログ
-        logging.info(f"GOOGLE_API_KEY: {google_api_key}")
-        logging.info(f"GOOGLE_CSE_ID: {google_cse_id}")
-        logging.info(f"GOOGLE_CREDENTIALS_JSON: {credentials_json}")
+        google_api_key = os.getenv('GOOGLE_API_KEY')
+        google_cse_id = os.getenv('GOOGLE_CSE_ID')
+        credentials_json = os.getenv('GOOGLE_CREDENTIALS_JSON')  # '/home/ec2-user/seo-rank-checker/service_account.json'
+
+        # デバッグ用ログ（環境変数が設定されているか確認）
+        logging.info(f"GOOGLE_API_KEY is set: {bool(google_api_key)}")
+        logging.info(f"GOOGLE_CSE_ID is set: {bool(google_cse_id)}")
+        logging.info(f"GOOGLE_CREDENTIALS_JSON is set: {bool(credentials_json)}")
 
         if not google_api_key or not google_cse_id or not credentials_json:
             raise ValueError("One or more environment variables are not set.")
-        
+
+        # ファイルの存在確認
+        if not os.path.isfile(credentials_json):
+            raise FileNotFoundError(f"Service account JSON file not found at: {credentials_json}")
+
         spreadsheet_name = 'SEO Rankings'  # スプレッドシートの名前
         sheet_name = 'Rankings'             # 使用するシート名（例: 'Rankings'）
 
@@ -129,13 +135,25 @@ def update_rankings():
         logging.error(f"Error updating rankings: {e}")
         print(f"Error updating rankings: {e}")
 
-
 # スケジューリング設定
-schedule.every().day.at("00:00").do(update_rankings)
+def schedule_tasks():
+    schedule.every().day.at("00:00").do(update_rankings)
+    logging.info("Scheduler started. Waiting for scheduled tasks...")
+    print("Scheduler started. Waiting for scheduled tasks...")
 
-logging.info("Scheduler started. Waiting for scheduled tasks...")
-print("Scheduler started. Waiting for scheduled tasks...")
+    while True:
+        schedule.run_pending()
+        time.sleep(60)  # 1分ごとにチェック
 
-while True:
-    schedule.run_pending()
-    time.sleep(60)  # 1分ごとにチェック
+def main():
+    parser = argparse.ArgumentParser(description='SEO Rank Checker')
+    parser.add_argument('--run-once', action='store_true', help='Run the rank checker once and exit')
+    args = parser.parse_args()
+
+    if args.run_once:
+        update_rankings()
+    else:
+        schedule_tasks()
+
+if __name__ == "__main__":
+    main()
