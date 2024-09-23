@@ -8,7 +8,8 @@ import time
 import os
 import logging
 import argparse
-import sys
+import concurrent.futures
+import random
 
 # ログ設定
 logging.basicConfig(
@@ -17,46 +18,70 @@ logging.basicConfig(
     format='%(asctime)s:%(levelname)s:%(message)s'
 )
 
-# Google検索順位取得関数
-def get_google_rank(api_key, cse_id, query, target_url):
+# Google検索順位取得関数（最大50位）
+def get_google_rank(api_key, cse_id, query, target_url, max_results=50):
     search_url = "https://www.googleapis.com/customsearch/v1"
-    params = {
-        'key': api_key,
-        'cx': cse_id,
-        'q': query,
-        'num': 10
-    }
-    response = requests.get(search_url, params=params)
-    results = response.json()
+    rank = None
 
-    if 'items' not in results:
-        return None
+    for start in range(1, max_results + 1, 10):
+        params = {
+            'key': api_key,
+            'cx': cse_id,
+            'q': query,
+            'num': 10,
+            'start': start
+        }
+        response = requests.get(search_url, params=params)
+        results = response.json()
 
-    for idx, item in enumerate(results['items'], start=1):
-        if target_url in item['link']:
-            return idx
-    return None
+        if 'items' not in results:
+            break  # 検索結果がない場合は終了
 
-# Yahoo検索順位取得関数
-def get_yahoo_rank(query, target_url):
+        for idx, item in enumerate(results['items'], start=start):
+            if target_url in item['link']:
+                return idx  # 対象URLが見つかった順位を返す
+
+        # APIのクォータ制限などで追加のページが取得できない場合も終了
+        if 'nextPage' not in results.get('queries', {}):
+            break
+
+        # リクエスト間に待機時間を設けてAPIへの負荷を軽減
+        time.sleep(random.uniform(1, 2))  # 1〜2秒のランダムな待機
+
+    return rank  # 見つからなかった場合はNone
+
+# Yahoo検索順位取得関数（最大50位）
+def get_yahoo_rank(query, target_url, max_results=50):
     base_url = "https://search.yahoo.co.jp/search"
-    params = {
-        'p': query
-    }
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
     }
-    response = requests.get(base_url, params=params, headers=headers)
-    soup = BeautifulSoup(response.text, 'html.parser')
+    rank = None
 
-    # Yahooの検索結果のHTML構造は変更される可能性があるため、適宜修正が必要
-    results = soup.find_all('div', class_='Sw-Card')  # クラス名は実際のYahoo検索結果に合わせて調整
+    for page in range(1, (max_results // 10) + 1):
+        params = {
+            'p': query,
+            'b': (page - 1) * 10 + 1  # 検索結果の開始位置
+        }
+        response = requests.get(base_url, params=params, headers=headers)
+        soup = BeautifulSoup(response.text, 'html.parser')
 
-    for idx, result in enumerate(results, start=1):
-        link = result.find('a', href=True)
-        if link and target_url in link['href']:
-            return idx
-    return None
+        # Yahooの検索結果のHTML構造に基づいて結果を抽出
+        results = soup.find_all('div', class_='Sw-Card')  # クラス名は実際のHTMLに合わせて調整
+
+        for idx, result in enumerate(results, start=(page - 1) * 10 + 1):
+            link = result.find('a', href=True)
+            if link and target_url in link['href']:
+                return idx  # 対象URLが見つかった順位を返す
+
+        # 次のページが存在しない場合は終了
+        if not results:
+            break
+
+        # リクエスト間に待機時間を設けてサイトへの負荷を軽減
+        time.sleep(random.uniform(1, 2))  # 1〜2秒のランダムな待機
+
+    return rank  # 見つからなかった場合はNone
 
 # Googleスプレッドシート認証
 def authenticate_google_sheets(creds_json):
@@ -68,10 +93,36 @@ def authenticate_google_sheets(creds_json):
     client = gspread.authorize(credentials)
     return client
 
+# ターゲットの順位取得とシートへの書き込み
+def process_target(target, google_api_key, google_cse_id, sheet, date_str):
+    try:
+        keyword = target['keyword']
+        url = target['url']
+
+        # Google順位取得（最大50位）
+        google_rank = get_google_rank(google_api_key, google_cse_id, keyword, url, max_results=50)
+        google_rank_str = str(google_rank) if google_rank else '未表示'
+
+        # Yahoo順位取得（最大50位）
+        yahoo_rank = get_yahoo_rank(keyword, url, max_results=50)
+        yahoo_rank_str = str(yahoo_rank) if yahoo_rank else '未表示'
+
+        # シートに追加するデータ
+        row = [date_str, keyword, url, google_rank_str, yahoo_rank_str]
+
+        # シートに書き込み
+        sheet.append_row(row)
+
+        # ログに成功を記録
+        logging.info(f"Successfully updated ranks for keyword: '{keyword}'")
+
+    except Exception as e:
+        logging.error(f"Error processing target {target}: {e}")
+
 # データ更新関数
 def update_rankings():
     try:
-        # 設定
+        # 環境変数の取得
         google_api_key = os.getenv('GOOGLE_API_KEY')
         google_cse_id = os.getenv('GOOGLE_CSE_ID')
         credentials_json = os.getenv('GOOGLE_CREDENTIALS_JSON')  # '/home/ec2-user/seo-rank-checker/service_account.json'
@@ -96,6 +147,10 @@ def update_rankings():
                 'keyword': 'どら焼き　有名',
                 'url': 'https://tsuboya.net/blogs/blog/dorayaki_famous'
             },
+            {
+                'keyword': 'あんこ　栄養',
+                'url': 'https://tsuboya.net/blogs/blog/anko_nutrients'
+            },
             # 他のキーワードとURLを追加する場合は、ここに追加
         ]
 
@@ -109,24 +164,15 @@ def update_rankings():
         # 日付取得
         date_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-        # 各ターゲットの順位を取得し、シートに書き込み
-        for target in targets:
-            keyword = target['keyword']
-            url = target['url']
-
-            # Google順位取得
-            google_rank = get_google_rank(google_api_key, google_cse_id, keyword, url)
-            google_rank_str = str(google_rank) if google_rank else '未表示'
-
-            # Yahoo順位取得
-            yahoo_rank = get_yahoo_rank(keyword, url)
-            yahoo_rank_str = str(yahoo_rank) if yahoo_rank else '未表示'
-
-            # シートに追加するデータ
-            row = [date_str, keyword, url, google_rank_str, yahoo_rank_str]
-
-            # シートに書き込み
-            sheet.append_row(row)
+        # 並列処理の設定
+        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+            futures = [
+                executor.submit(process_target, target, google_api_key, google_cse_id, sheet, date_str)
+                for target in targets
+            ]
+            for future in concurrent.futures.as_completed(futures):
+                if future.exception():
+                    logging.error(f"Error in thread: {future.exception()}")
 
         logging.info(f"Updated rankings at {datetime.now()}")
         print(f"Updated rankings at {datetime.now()}")
@@ -137,7 +183,8 @@ def update_rankings():
 
 # スケジューリング設定
 def schedule_tasks():
-    schedule.every().day.at("00:00").do(update_rankings)
+    # 2日に1回実行するようにスケジュールを設定
+    schedule.every(2).days.do(update_rankings)
     logging.info("Scheduler started. Waiting for scheduled tasks...")
     print("Scheduler started. Waiting for scheduled tasks...")
 
@@ -153,7 +200,7 @@ def main():
     if args.run_once:
         update_rankings()
     else:
-        # 再起動時に一度だけ順位を取得
+        # 初回実行
         update_rankings()
         # 定期的な順位チェックを開始
         schedule_tasks()
