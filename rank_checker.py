@@ -144,11 +144,11 @@ def update_rankings():
         # キーワードとターゲットURLのリスト
         targets = [
             {
-                'keyword': 'どら焼き　有名',
+                'keyword': 'どら焼き 有名',
                 'url': 'https://tsuboya.net/blogs/blog/dorayaki_famous'
             },
             {
-                'keyword': 'あんこ　栄養',
+                'keyword': 'あんこ 栄養',
                 'url': 'https://tsuboya.net/blogs/blog/anko_nutrients'
             },
             # 他のキーワードとURLを追加する場合は、ここに追加
@@ -199,6 +199,7 @@ def main():
 
     if args.run_once:
         update_rankings()
+        print("aaaaaaa") 
     else:
         # 初回実行
         update_rankings()
